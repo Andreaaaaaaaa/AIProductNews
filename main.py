@@ -3,10 +3,10 @@ import requests
 import json
 from datetime import datetime
 
-# 从 GitHub Secrets 中读取 Webhook 地址，更安全
+# 从 GitHub Secrets 中读取 Webhook 地址
 WEBHOOK_URL = os.environ.get("WECOM_WEBHOOK_KEY")
 
-# 关键词过滤：只有包含这些词的新闻才会被推送
+# 关键词过滤
 KEYWORDS = ["AI", "大模型", "GPT", "Copilot", "数据", "DeepMind", "OpenAI", "分析", "趋势"]
 
 def fetch_readhub_news():
@@ -31,7 +31,7 @@ def filter_news(news_list):
         if any(k.lower() in (title + summary).lower() for k in KEYWORDS):
             target_news.append({
                 "title": title,
-                "summary": summary[:80] + "...", # 摘要截取前80字
+                "summary": summary[:80] + "...", 
                 "url": f"https://readhub.cn/topic/{item.get('id')}"
             })
     return target_news
@@ -51,12 +51,11 @@ def send_wecom(news_list):
     
     # 构建 Markdown 消息
     content_lines = [f"### 🤖 AI & 数据产品日报 ({today})"]
-    for idx, news in enumerate(news_list[:5], 1): # 限制最多发5条
+    for idx, news in enumerate(news_list[:5], 1): 
         content_lines.append(f"**{idx}. [{news['title']}]({news['url']})**")
         content_lines.append(f"><font color='comment'>{news['summary']}</font>")
     
-    # 底部加一个小尾巴
-    content_lines.append(f"\n_来自 GitHub Actions 自动推送_") 
+    # --- 原来的底部小尾巴代码已删除 ---
 
     data = {
         "msgtype": "markdown",
@@ -64,15 +63,3 @@ def send_wecom(news_list):
             "content": "\n".join(content_lines)
         }
     }
-
-    try:
-        resp = requests.post(WEBHOOK_URL, json=data)
-        print(f"推送结果: {resp.text}")
-    except Exception as e:
-        print(f"推送出错: {e}")
-
-if __name__ == "__main__":
-    news = fetch_readhub_news()
-    filtered_news = filter_news(news)
-    print(f"抓取到 {len(news)} 条，筛选出 {len(filtered_news)} 条")
-    send_wecom(filtered_news)
