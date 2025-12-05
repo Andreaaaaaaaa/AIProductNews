@@ -56,17 +56,14 @@ def fetch_36kr_rss():
     try:
         response = requests.get(rss_url, headers=headers, timeout=15)
         if response.status_code == 200:
-            # 解析 XML
             try:
                 root = ET.fromstring(response.content)
                 items = []
-                # 36Kr 的 RSS 结构通常在 channel -> item 下
-                for item in root.findall('./channel/item')[:20]: # 取前20条
+                for item in root.findall('./channel/item')[:20]: 
                     title = item.find('title').text if item.find('title') is not None else "无标题"
                     link = item.find('link').text if item.find('link') is not None else ""
                     desc = item.find('description').text if item.find('description') is not None else ""
                     
-                    # 构造和 ReadHub 一样的数据结构
                     items.append({
                         "id": link,
                         "title": title,
@@ -94,17 +91,16 @@ def process_news_with_ai(news_list):
     if not news_list:
         return []
 
-    # 准备素材
     raw_data = []
     for item in news_list:
         raw_data.append({
             "title": item.get('title'),
-            "summary": item.get('summary', '')[:150], # 进一步压缩摘要长度
+            "summary": item.get('summary', '')[:150], 
             "url": item.get('url') or f"https://readhub.cn/topic/{item.get('id')}"
         })
 
     system_prompt = """
-    你是一位【资深数据产品专家】。你的任务是从新闻列表中筛选出 3-5 条对“数据产品经理”最有价值的新闻。
+    你是一位【资深数据产品专家】。你的任务是从新闻列表中筛选出 3-5 条对“数据产品经理”“数据产品体验设计师”最有价值的新闻。
     
     筛选标准：
     1. 优先选择：AI Agent、大模型应用、BI/数据分析工具更新、数字化转型案例。
@@ -129,13 +125,11 @@ def process_news_with_ai(news_list):
         
         content = response.choices[0].message.content
         
-        # 清洗 Markdown 标记
         if content.startswith("```"):
             content = re.sub(r"^```json\s*|\s*```$", "", content, flags=re.MULTILINE)
         
         result = json.loads(content)
         
-        # 兼容性处理
         if isinstance(result, dict):
             for key in result:
                 if isinstance(result[key], list):
@@ -168,7 +162,8 @@ def send_wecom(news_list):
         comment = news.get('comment', '暂无点评')
         
         content_lines.append(f"**{idx}. [{title}]({url})**")
-        content_lines.append(f"><font color='info'>💡 {comment}</font>")
+        # === 修改点：去掉了 <font> 标签，只保留 Markdown 的引用符号 > ===
+        content_lines.append(f"> 💡 {comment}")
         content_lines.append("")
 
     data = {
@@ -185,8 +180,6 @@ def send_wecom(news_list):
         print(f"❌ 推送出错: {e}")
 
 if __name__ == "__main__":
-    # === 主流程 ===
-    
     # 1. 先试 ReadHub
     raw_news = fetch_readhub_news()
     
