@@ -16,7 +16,7 @@ client = OpenAI(
     base_url="https://api.deepseek.com"
 )
 
-# === 工具函数：通用 RSS 解析器 ===
+# === 工具函数：通用 RSS 解析器 (增强版) ===
 def fetch_rss_data(source_name, rss_url):
     """
     通用的 RSS 抓取函数
@@ -30,33 +30,52 @@ def fetch_rss_data(source_name, rss_url):
     try:
         response = requests.get(rss_url, headers=headers, timeout=15)
         if response.status_code == 200:
-            content = response.content
+            # 兼容处理：有些 RSS 编码可能是乱码，使用 content 让 ET 自动处理
             try:
-                root = ET.fromstring(content)
-                nodes = root.findall('./channel/item')
+                root = ET.fromstring(response.content)
+                
+                # 暴力查找所有的 item 标签（不管它藏在多深的层级里）
+                # 这种写法能同时搞定 RSS 2.0, RSS 1.0 (Solidot) 和部分 Atom
+                nodes = root.findall('.//item') 
                 if not nodes:
-                    nodes = root.findall('.//{http://purl.org/rss/1.0/}item')
-                if not nodes:
-                    nodes = root.findall('item')
+                    # 如果找不到 item，尝试找 Atom 格式的 entry
+                    nodes = root.findall('.//{http://www.w3.org/2005/Atom}entry')
 
-                for item in nodes[:10]: 
+                for item in nodes[:8]: # 限制数量，防止 Token 溢出
+                    # === 标题抓取 ===
+                    title = "无标题"
                     title_node = item.find('title')
-                    if title_node is None: 
+                    if title_node is None:
+                        # 尝试带命名空间的 XML 查找
                         title_node = item.find('{http://purl.org/rss/1.0/}title')
-                    title = title_node.text if title_node is not None else "无标题"
+                    if title_node is not None:
+                        title = title_node.text
 
+                    # === 链接抓取 ===
+                    link = ""
                     link_node = item.find('link')
                     if link_node is None:
                         link_node = item.find('{http://purl.org/rss/1.0/}link')
-                    link = link_node.text if link_node is not None else ""
+                    
+                    if link_node is not None:
+                        link = link_node.text
+                        # 兼容 Atom: <link href="..." />
+                        if not link and link_node.attrib.get('href'):
+                            link = link_node.attrib.get('href')
 
+                    # === 描述抓取 ===
+                    desc = ""
                     desc_node = item.find('description')
                     if desc_node is None:
                         desc_node = item.find('{http://purl.org/rss/1.0/}description')
-                    desc = desc_node.text if desc_node is not None else ""
-                    desc = re.sub(r'<[^>]+>', '', desc) # 去除HTML标签
-
-                    if title and link:
+                    
+                    if desc_node is not None and desc_node.text:
+                        desc = desc_node.text
+                    
+                    # 清洗 HTML 标签
+                    desc = re.sub(r'<[^>]+>', '', desc)
+                    
+                    if link:
                         items.append({
                             "source": source_name,
                             "title": title,
@@ -116,17 +135,17 @@ def get_all_news():
 
 def process_news_with_ai(news_list):
     """
-    AI 筛选与点评（Prompt 已更新：双重角色 + 纯净输出）
+    AI 筛选与点评
     """
-    if len(news_list) > 45:
-        print(f"✂️ 新闻太多({len(news_list)}条)，截取前 45 条喂给 AI...")
-        news_list = news_list[:45]
+    if len(news_list) > 40:
+        print(f"✂️ 新闻太多({len(news_list)}条)，截取前 40 条喂给 AI...")
+        news_list = news_list[:40]
 
     print(f"🧠 AI (产品专家 & 体验设计师) 正在阅读 {len(news_list)} 条新闻...")
     
     raw_text = json.dumps(news_list, ensure_ascii=False)
     
-    # === 核心修改区域：人设与要求 ===
+    # === 修复点：明确要求 JSON 对象格式 ===
     system_prompt = """
     你是一位拥有双重视角的专家：既是【资深数据产品专家】，又是【数据产品体验设计师】。
     你的任务是为同行业者筛选出 4-6 条最有价值的资讯。
@@ -140,19 +159,21 @@ def process_news_with_ai(news_list):
     1. 标题：简练、专业。
     2. 点评（Comment）：
        - 必须结合“商业价值”或“用户体验”进行深度洞察。
-       - **严禁**出现“作为设计师”、“笔者认为”、“从产品角度看”等身份指代词。
-       - **严禁**写“这条新闻介绍了...”这类废话。
-       - 直接输出观点。例如：“此功能将大幅降低非技术人员的取数门槛，是数据民主化的关键一步。”
+       - 严禁出现“作为设计师”、“笔者认为”等身份指代词。
+       - 直接输出观点。
+    3. **格式要求**：必须返回一个包含 `news` 字段的 JSON 对象。
 
-    请返回 JSON 数组格式：
-    [
-        {
-            "title": "重写后的标题",
-            "source": "来源",
-            "comment": "直接的犀利点评",
-            "url": "链接"
-        }
-    ]
+    JSON 示例：
+    {
+        "news": [
+            {
+                "title": "重写后的标题",
+                "source": "来源",
+                "comment": "直接的犀利点评",
+                "url": "链接"
+            }
+        ]
+    }
     """
 
     try:
@@ -167,18 +188,27 @@ def process_news_with_ai(news_list):
         )
         content = response.choices[0].message.content
         
+        # 清洗
         if content.startswith("```"):
             content = re.sub(r"^```json\s*|\s*```$", "", content, flags=re.MULTILINE)
             
         result = json.loads(content)
         
+        # === 修复点：兼容解析逻辑 ===
+        # 现在的 Prompt 会返回 {"news": [...]}, 所以我们优先取 result["news"]
         if isinstance(result, dict):
+            if "news" in result and isinstance(result["news"], list):
+                return result["news"]
+            # 兜底：如果 AI 还是自作聪明只返回了 list 的 dict 包装
             for k, v in result.items():
                 if isinstance(v, list): return v
-        return result if isinstance(result, list) else []
+        
+        return []
         
     except Exception as e:
         print(f"❌ AI 思考失败: {e}")
+        # 调试打印，方便看 AI 到底回了什么
+        print(f"AI 原始内容: {content[:200] if 'content' in locals() else '空'}")
         return []
 
 def send_wecom(news_list):
