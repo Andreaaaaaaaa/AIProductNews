@@ -1,41 +1,57 @@
 import os
 import requests
 import json
+import re
 from datetime import datetime
 from openai import OpenAI
 
 # === 1. 配置区域 ===
-# 从 GitHub Secrets 获取密钥
 WEBHOOK_URL = os.environ.get("WECOM_WEBHOOK_KEY")
 DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY")
 
 # 初始化 DeepSeek 客户端
 client = OpenAI(
     api_key=DEEPSEEK_KEY,
-    base_url="https://api.deepseek.com"
+    base_url="[https://api.deepseek.com](https://api.deepseek.com)"
 )
 
 def fetch_readhub_news():
     """
     第一步：搬运工
-    抓取 ReadHub 数据，增加了【浏览器伪装】防止被拦截
+    抓取 ReadHub 数据，增加了【全套浏览器伪装】防止被拦截
     """
     print("🚀 正在从 ReadHub 进货...")
-    api_url = "https://api.readhub.cn/topic?lastCursor=&pageSize=25"
+    # 去掉了 lastCursor 参数，直接请求最新数据
+    api_url = "[https://api.readhub.cn/topic?pageSize=20](https://api.readhub.cn/topic?pageSize=20)"
     
-    # 关键修改：加上伪装头，假装自己是 Chrome 浏览器
+    # 关键修改：补全了 Referer 和 Origin，这对很多 API 是必须的
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "[https://readhub.cn](https://readhub.cn)",
+        "Referer": "[https://readhub.cn/](https://readhub.cn/)",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
     }
     
     try:
-        response = requests.get(api_url, headers=headers, timeout=15)
-        print(f"📡 ReadHub 响应状态码: {response.status_code}") # 调试用：200表示成功
+        # 使用 Session 对象可以稍微模拟更好一点的网络环境
+        session = requests.Session()
+        response = session.get(api_url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            return response.json().get('data', [])
+            try:
+                data = response.json()
+                items = data.get('data', [])
+                if not items:
+                    print(f"⚠️ 警告：状态码 200，但数据列表为空。")
+                    print(f"🕵️ 服务器返回原始内容片段: {response.text[:200]}")
+                return items
+            except json.JSONDecodeError:
+                print(f"❌ 解析 JSON 失败，返回可能不是 JSON: {response.text[:100]}")
+                return []
         else:
             print(f"❌ 抓取被拦截，状态码: {response.status_code}")
+            print(f"❌ 错误详情: {response.text[:100]}")
     except Exception as e:
         print(f"❌ 网络请求出错: {e}")
     return []
@@ -50,17 +66,16 @@ def process_news_with_ai(news_list):
     if not news_list:
         return []
 
-    # 准备喂给 AI 的素材，只保留必要信息以节省 Token
+    # 准备素材
     raw_data = []
     for item in news_list:
         raw_data.append({
             "id": item.get('id'),
             "title": item.get('title'),
-            "summary": item.get('summary', '')[:200], # 限制长度
-            "url": f"https://readhub.cn/topic/{item.get('id')}"
+            "summary": item.get('summary', '')[:200],
+            "url": f"[https://readhub.cn/topic/](https://readhub.cn/topic/){item.get('id')}"
         })
 
-    # AI 的人设与指令
     system_prompt = """
     你是一位眼光毒辣的【资深数据产品专家】。
     你的任务是从给定的新闻列表中，筛选出 3-5 条对“数据产品经理”最有价值的新闻。
@@ -87,9 +102,13 @@ def process_news_with_ai(news_list):
         )
         
         content = response.choices[0].message.content
+        
+        # === 增加清洗逻辑：防止 AI 返回 Markdown 代码块 ===
+        if content.startswith("```"):
+            content = re.sub(r"^```json\s*|\s*```$", "", content, flags=re.MULTILINE)
+        
         result = json.loads(content)
         
-        # 兼容处理各种 JSON 结构
         if isinstance(result, dict):
             for key in result:
                 if isinstance(result[key], list):
@@ -98,6 +117,8 @@ def process_news_with_ai(news_list):
 
     except Exception as e:
         print(f"❌ AI 处理失败: {e}")
+        # 如果出错，打印一下 AI 返回了什么，方便调试
+        print(f"AI 返回的原始内容: {content if 'content' in locals() else '无内容'}")
         return []
 
 def send_wecom(news_list):
@@ -109,46 +130,4 @@ def send_wecom(news_list):
         print("❌ 错误：Webhook 未配置")
         return
 
-    if not news_list:
-        print("⚠️ AI 觉得今天没有什么值得看的新闻，跳过推送。")
-        return
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    # 构建 Markdown 消息
-    content_lines = [f"### 🧠 AI 数据产品内参 ({today})"]
-    
-    for idx, news in enumerate(news_list, 1):
-        content_lines.append(f"**{idx}. [{news['title']}]({news['url']})**")
-        content_lines.append(f"><font color='comment'>💡 {news['comment']}</font>")
-        content_lines.append("") # 空一行增加阅读舒适度
-
-    data = {
-        "msgtype": "markdown",
-        "markdown": {
-            "content": "\n".join(content_lines)
-        }
-    }
-
-    try:
-        resp = requests.post(WEBHOOK_URL, json=data)
-        print(f"✅ 推送完成！服务器响应: {resp.text}")
-    except Exception as e:
-        print(f"❌ 推送出错: {e}")
-
-if __name__ == "__main__":
-    # 1. 抓取
-    raw_news = fetch_readhub_news()
-    if raw_news:
-        print(f"📦 成功抓取到 {len(raw_news)} 条原始新闻")
-        
-        # 2. AI 思考
-        ai_news = process_news_with_ai(raw_news)
-        if ai_news:
-            print(f"💎 AI 筛选出 {len(ai_news)} 条精华")
-            # 3. 推送
-            send_wecom(ai_news)
-        else:
-            print("⚠️ AI 没筛选出合适的内容。")
-    else:
-        print("⚠️ 没有抓取到任何数据，请检查网络或源站状态。")
+    if not
