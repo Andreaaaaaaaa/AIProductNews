@@ -46,7 +46,6 @@ def fetch_readhub_news():
 def fetch_36kr_rss():
     """
     引擎 2：36Kr RSS (备用方案，稳定性极高)
-    使用 Python 原生 XML 库解析，不需要额外安装 feedparser
     """
     print("🔄 [引擎2] 启动备用电源：正在抓取 36Kr RSS...")
     rss_url = "https://36kr.com/feed"
@@ -58,28 +57,32 @@ def fetch_36kr_rss():
         response = requests.get(rss_url, headers=headers, timeout=15)
         if response.status_code == 200:
             # 解析 XML
-            root = ET.fromstring(response.content)
-            items = []
-            # 36Kr 的 RSS 结构通常在 channel -> item 下
-            for item in root.findall('./channel/item')[:20]: # 取前20条
-                title = item.find('title').text if item.find('title') is not None else "无标题"
-                link = item.find('link').text if item.find('link') is not None else ""
-                desc = item.find('description').text if item.find('description') is not None else ""
+            try:
+                root = ET.fromstring(response.content)
+                items = []
+                # 36Kr 的 RSS 结构通常在 channel -> item 下
+                for item in root.findall('./channel/item')[:20]: # 取前20条
+                    title = item.find('title').text if item.find('title') is not None else "无标题"
+                    link = item.find('link').text if item.find('link') is not None else ""
+                    desc = item.find('description').text if item.find('description') is not None else ""
+                    
+                    # 构造和 ReadHub 一样的数据结构
+                    items.append({
+                        "id": link,
+                        "title": title,
+                        "summary": desc,
+                        "url": link
+                    })
                 
-                # 构造和 ReadHub 一样的数据结构，方便 AI 统一处理
-                items.append({
-                    "id": link, # 用链接当 ID
-                    "title": title,
-                    "summary": desc,
-                    "url": link
-                })
-            
-            print(f"✅ 36Kr 成功获取 {len(items)} 条")
-            return items
+                print(f"✅ 36Kr 成功获取 {len(items)} 条")
+                return items
+            except Exception as xml_e:
+                print(f"❌ XML 解析失败: {xml_e}")
+                return []
         else:
             print(f"❌ 36Kr 请求失败: {response.status_code}")
     except Exception as e:
-        print(f"❌ 36Kr 解析错误: {e}")
+        print(f"❌ 36Kr 连接错误: {e}")
     return []
 
 def process_news_with_ai(news_list):
@@ -198,4 +201,9 @@ if __name__ == "__main__":
         ai_news = process_news_with_ai(raw_news)
         
         if ai_news:
-            print(f"💎 AI 筛选出 {len(ai_news)}
+            print(f"💎 AI 筛选出 {len(ai_news)} 条精华，准备推送...")
+            send_wecom(ai_news)
+        else:
+            print("⚠️ AI 认为今天的新闻都不太行，决定不打扰你。")
+    else:
+        print("❌ 所有数据源都挂了，请检查网络或 GitHub Actions 环境。")
