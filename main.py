@@ -190,3 +190,6 @@ if __name__ == "__main__":
         # 2. AI 润色
         final_news = process_news_with_ai(raw_news)
         if final_news:
+            send_wecom(final_news)
+        else:
+            print("⚠️ AI 未筛选出结果")
