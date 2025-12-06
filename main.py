@@ -10,7 +10,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 # === 1. 配置区域 ===
 # ⚠️ 调试模式：True = 只打印不发送；False = 正式发送
@@ -45,7 +46,8 @@ def fetch_uisdc_news_html():
     driver = None
     try:
         print(f"🔄 Launching Browser for {target_url}...")
-        driver = webdriver.Chrome(options=chrome_options)
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.get(target_url)
         
         # Wait for the Dubao items to load (dynamic content)
