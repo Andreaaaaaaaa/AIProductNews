@@ -7,7 +7,7 @@ from datetime import datetime
 from openai import OpenAI
 
 # === 1. 配置区域 ===
-# ⚠️ 调试开关：设置为 True 时，只打印不发送；设置为 False 时，正式发送
+# ⚠️ 调试开关：True = 只打印不发送；False = 正式发送
 DRY_RUN = True 
 
 WEBHOOK_URL = os.environ.get("WECOM_WEBHOOK_KEY")
@@ -21,7 +21,9 @@ client = OpenAI(
 
 # === RSS 抓取器 ===
 def fetch_rss_data(rss_url):
-    print(f"🔄 正在连接优设网 (UISDC)...")
+    # 打印一下当前的 URL，确保它是纯净的
+    print(f"🔄 正在连接优设网: {rss_url}")
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
@@ -34,9 +36,9 @@ def fetch_rss_data(rss_url):
                 root = ET.fromstring(response.content)
                 nodes = root.findall('.//item')
                 
-                # 调试模式下，我们只取前 3 条来测试，节省 DeepSeek 的额度
+                # 调试模式下只处理前 3 条
                 limit = 3 if DRY_RUN else 15
-                print(f"🧪 调试模式：只处理前 {limit} 条数据" if DRY_RUN else f"🚀 正式模式：处理前 {limit} 条数据")
+                print(f"🧪 调试模式：处理前 {limit} 条" if DRY_RUN else f"🚀 正式模式：处理前 {limit} 条")
 
                 for item in nodes[:limit]: 
                     title = item.find('title').text if item.find('title') is not None else "无标题"
@@ -54,14 +56,14 @@ def fetch_rss_data(rss_url):
                             "url": link
                         })
                 
-                print(f"✅ 成功获取 {len(items)} 条优设资讯")
+                print(f"✅ 成功获取 {len(items)} 条资讯")
                 return items
             except Exception as e:
                 print(f"❌ XML 解析失败: {e}")
         else:
             print(f"❌ 请求失败: {response.status_code}")
     except Exception as e:
-        print(f"❌ 网络错误: {e}")
+        print(f"❌ 网络错误 (可能是 URL 格式不对): {e}")
     
     return items
 
@@ -70,7 +72,7 @@ def process_news_with_ai(news_list):
         
     print(f"🧠 AI 正在提炼 {len(news_list)} 条资讯的重点...")
     
-    # 构造 Prompt 素材 (必须包含 URL 以便回填)
+    # 构造 Prompt 素材
     input_data = [{"title": n["title"], "summary": n["original_summary"], "url": n["url"]} for n in news_list]
     raw_text = json.dumps(input_data, ensure_ascii=False)
     
@@ -142,7 +144,7 @@ def send_wecom(news_list):
     # === 拦截逻辑 ===
     if DRY_RUN:
         print("\n" + "="*30)
-        print("📢 [模拟发送] 如果是正式模式，你会收到以下内容：")
+        print("📢 [模拟发送] 看起来不错！正式内容如下：")
         print("="*30)
         print(final_content)
         print("="*30 + "\n")
@@ -161,7 +163,10 @@ def send_wecom(news_list):
         print(f"❌ 推送失败: {e}")
 
 if __name__ == "__main__":
-    raw_news = fetch_rss_data("[https://www.uisdc.com/news/feed](https://www.uisdc.com/news/feed)")
+    # 修正点：这里必须是纯净的字符串，不能有 [] 或 ()
+    target_url = "[https://www.uisdc.com/news/feed](https://www.uisdc.com/news/feed)"
+    
+    raw_news = fetch_rss_data(target_url)
     
     if not raw_news:
         print("❌ 抓取失败")
