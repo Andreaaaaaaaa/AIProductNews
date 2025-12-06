@@ -16,7 +16,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 # === 1. 配置区域 ===
 # ⚠️ 调试模式：True = 只打印不发送；False = 正式发送
 # 验证通过后，记得改成 False
-DRY_RUN = True
+DRY_RUN = False
 
 WEBHOOK_URL = os.environ.get("WECOM_WEBHOOK_KEY")
 DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY")
