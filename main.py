@@ -71,6 +71,8 @@ def fetch_uisdc_news_html():
             print("⚠️ Still did not find .dubao-item after JS wait.")
             return []
 
+        # User request: Limit to top 20 items
+        news_items = news_items[:20]
         print(f"✅ Found {len(news_items)} items. Processing...")
 
         valid_news = []
@@ -214,6 +216,8 @@ if __name__ == "__main__":
         
         # 3. 发送
         if final_news:
+            # User request: Final push should only be 5 items
+            final_news = final_news[:5]
             send_wecom(final_news)
         else:
             print("⚠️ 最终列表为空")
