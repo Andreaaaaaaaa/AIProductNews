@@ -4,11 +4,11 @@ import json
 import re
 from datetime import datetime
 from openai import OpenAI
-# 引入新朋友：BeautifulSoup (专门用来解析网页 HTML)
 from bs4 import BeautifulSoup 
 
 # === 1. 配置区域 ===
 # ⚠️ 调试模式：True = 只打印不发送；False = 正式发送
+# 验证通过后，记得改成 False
 DRY_RUN = True 
 
 WEBHOOK_URL = os.environ.get("WECOM_WEBHOOK_KEY")
@@ -19,13 +19,12 @@ client = OpenAI(
     base_url="https://api.deepseek.com"
 )
 
-# === 2. 网页爬虫抓取器 (针对 HTML) ===
+# === 2. 网页爬虫 ===
 def fetch_uisdc_news_html():
     target_url = "https://www.uisdc.com/news"
     print(f"🔄 正在像浏览器一样访问: {target_url}")
     
     headers = {
-        # 必须伪装成浏览器，否则优设可能会拦截
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.uisdc.com/",
         "Accept-Language": "zh-CN,zh;q=0.9"
@@ -34,25 +33,16 @@ def fetch_uisdc_news_html():
     items = []
     try:
         response = requests.get(target_url, headers=headers, timeout=15)
-        response.encoding = 'utf-8' # 强制使用 utf-8 防止乱码
+        response.encoding = 'utf-8' 
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # === 🕵️‍♂️ 页面结构定位 (核心逻辑) ===
-            # 优设读报的结构通常是 .news-list 下的 .item 或者直接是 article 标签
-            # 我们尝试查找页面上所有带有 "读报" 特征的列表，或者直接找文章标题
-            
-            # 策略1：查找 .news-item (最常见的设计类网站命名)
-            # 策略2：查找 h2 或 h3 标签中包含链接的
-            
-            # 这里使用更稳健的查找：找到主要内容区域，然后提取标题
-            # 假设优设的新闻标题在 h3 或 h2 标签里
+            # 查找 h3 或 h2 标签
             news_nodes = soup.find_all(['h3', 'h2'])
             
             count = 0
             for node in news_nodes:
-                if count >= 8: break # 这里的“读报”可能很多，我们只取前8条最新的
+                if count >= 8: break 
                 
                 link_tag = node.find('a')
                 if not link_tag: continue
@@ -60,24 +50,21 @@ def fetch_uisdc_news_html():
                 title = link_tag.get_text(strip=True)
                 href = link_tag.get('href')
                 
-                # 过滤掉无效的、或者不是新闻的标题 (比如侧边栏广告)
                 if len(title) < 5: continue 
                 
-                # 尝试抓取紧跟在标题后面的描述 (通常是 <p>)
                 desc = ""
                 parent = node.parent
                 desc_node = parent.find('p')
                 if desc_node:
                     desc = desc_node.get_text(strip=True)
                 
-                # 优设的链接有时是相对路径，处理一下
                 if href and not href.startswith('http'):
                     href = f"https://www.uisdc.com{href}"
                     
                 if title and href:
                     items.append({
                         "title": title,
-                        "original_summary": desc[:200], # 截取前200字给AI
+                        "original_summary": desc[:200],
                         "url": href
                     })
                     count += 1
@@ -91,7 +78,7 @@ def fetch_uisdc_news_html():
     
     return items
 
-# === 3. AI 处理逻辑 ===
+# === 3. AI 处理逻辑 (已修复 Prompt 问题) ===
 def process_news_with_ai(news_list):
     if not news_list: return []
     
@@ -100,6 +87,7 @@ def process_news_with_ai(news_list):
     input_data = [{"title": n["title"], "summary": n["original_summary"], "url": n["url"]} for n in news_list]
     raw_text = json.dumps(input_data, ensure_ascii=False)
     
+    # === 关键修改：Prompt 里明确加上了 "JSON" 这个词 ===
     system_prompt = """
     你是一位【极简资讯编辑】。你的任务是重写优设读报的摘要。
     
@@ -112,6 +100,7 @@ def process_news_with_ai(news_list):
        - **保留 URL**：必须原样返回 URL。
 
     【输出格式】：
+    请严格返回 JSON 格式数据 (Return JSON):
     {
         "news": [
             {
@@ -185,7 +174,7 @@ if __name__ == "__main__":
     raw_news = fetch_uisdc_news_html()
     
     if not raw_news:
-        print("❌ 没抓到任何新闻，可能是优设网改版了 HTML 结构")
+        print("❌ 没抓到任何新闻")
     else:
         # 2. AI 润色
         final_news = process_news_with_ai(raw_news)
