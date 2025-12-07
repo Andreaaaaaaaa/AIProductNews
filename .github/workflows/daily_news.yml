@@ -3,7 +3,7 @@ name: Daily AI News Bot
 on:
   # 1. 定时触发：每天北京时间早上 9:00 (UTC 1:00)
   schedule:
-    - cron: '55 1 * * *'
+    - cron: '0 1 * * *'
   # 2. 手动触发：允许你在网页上点击按钮立即运行
   workflow_dispatch:
 
